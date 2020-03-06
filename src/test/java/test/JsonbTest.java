@@ -8,6 +8,7 @@ import javax.json.JsonObject;
 import javax.json.bind.Jsonb;
 import javax.json.bind.JsonbBuilder;
 import javax.json.bind.JsonbException;
+import javax.json.bind.annotation.JsonbAnnotation;
 import javax.json.bind.annotation.JsonbTypeDeserializer;
 import javax.json.bind.annotation.JsonbTypeSerializer;
 import javax.json.bind.serializer.DeserializationContext;
@@ -16,6 +17,11 @@ import javax.json.bind.serializer.JsonbSerializer;
 import javax.json.bind.serializer.SerializationContext;
 import javax.json.stream.JsonGenerator;
 import javax.json.stream.JsonParser;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Repeatable;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,27 +42,44 @@ class JsonbTest {
     static final Jsonb JSONB = JsonbBuilder.create();
     static final Type SHAPE_LIST = new ArrayList<Shape>() {}.getClass().getGenericSuperclass();
 
+    @JsonbAnnotation
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({ElementType.ANNOTATION_TYPE, ElementType.TYPE, ElementType.FIELD, ElementType.METHOD})
+    @Repeatable(JsonbTypeAliases.class)
+    public @interface JsonbTypeAlias {
+        String name();
 
-    public static class ShapeDeserializer implements JsonbDeserializer<Shape> {
-        @Override public Shape deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
+        Class<?> type();
+    }
+
+    @JsonbAnnotation
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({ElementType.ANNOTATION_TYPE, ElementType.TYPE, ElementType.FIELD, ElementType.METHOD})
+    public @interface JsonbTypeAliases {
+        JsonbTypeAlias[] value();
+    }
+
+    public static class PolymorphicDeserializer<T> implements JsonbDeserializer<T> {
+        @Override public T deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
             JsonObject value = parser.getObject();
-            String type = value.getString("@type", "<null>");
-            return JSONB.fromJson(value.toString(), classFor(type));
+            @SuppressWarnings("unchecked") Class<T> superType = (Class<T>) rtType;
+            return JSONB.fromJson(value.toString(), classFor(value, superType));
         }
 
-        private Class<? extends Shape> classFor(String type) {
-            switch (type) {
-                case "circle":
-                    return Circle.class;
-                case "square":
-                    return Square.class;
-                default:
-                    throw new JsonbException("unknown shape type " + type);
+        private Class<? extends T> classFor(JsonObject value, Class<T> superType) {
+            String typeString = value.getString("@type", "default");
+            for (
+                JsonbTypeAlias typeAlias : superType.getAnnotationsByType(JsonbTypeAlias.class)) {
+                if (typeAlias.name().equals(typeString))
+                    return typeAlias.type().asSubclass(superType);
             }
+            throw new JsonbException("unknown shape type " + typeString);
         }
     }
 
-    @JsonbTypeDeserializer(ShapeDeserializer.class)
+    @JsonbTypeDeserializer(PolymorphicDeserializer.class)
+    @JsonbTypeAlias(name = "circle", type = Circle.class)
+    @JsonbTypeAlias(name = "square", type = Square.class)
     public interface Shape {}
 
 
@@ -124,7 +147,7 @@ class JsonbTest {
         );
 
         then(throwable).isInstanceOf(JsonbException.class)
-            .hasMessage("unknown shape type <null>");
+            .hasMessage("unknown shape type default");
     }
 
     @Test void shouldFailToDeserializeUnknownTypeField() {
