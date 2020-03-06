@@ -1,11 +1,13 @@
 package test;
 
-import lombok.Value;
+import lombok.Data;
+import lombok.experimental.Accessors;
 import org.junit.jupiter.api.Test;
 
 import javax.json.JsonObject;
 import javax.json.bind.Jsonb;
 import javax.json.bind.JsonbBuilder;
+import javax.json.bind.JsonbException;
 import javax.json.bind.annotation.JsonbTypeDeserializer;
 import javax.json.bind.annotation.JsonbTypeSerializer;
 import javax.json.bind.serializer.DeserializationContext;
@@ -18,6 +20,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.BDDAssertions.then;
 
 @SuppressWarnings("unused")
@@ -26,8 +29,8 @@ class JsonbTest {
     static final String CIRCLE_JSON = "{'@type':'circle','radius':5.0}".replace('\'', '"');
     static final String SQUARE_JSON = "{'side':2.0,'@type':'square'}".replace('\'', '"');
     static final String JSON = "[" + CIRCLE_JSON + "," + SQUARE_JSON + "]";
-    static final Circle CIRCLE = new Circle(5.0);
-    static final Square SQUARE = new Square(2.0);
+    static final Circle CIRCLE = new Circle().setRadius(5.0);
+    static final Square SQUARE = new Square().setSide(2.0);
     static final List<Shape> SHAPES = List.of(CIRCLE, SQUARE);
 
     static final Jsonb JSONB = JsonbBuilder.create();
@@ -37,7 +40,7 @@ class JsonbTest {
     public static class ShapeDeserializer implements JsonbDeserializer<Shape> {
         @Override public Shape deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
             JsonObject value = parser.getObject();
-            String type = value.getString("@type", null);
+            String type = value.getString("@type", "<null>");
             return JSONB.fromJson(value.toString(), classFor(type));
         }
 
@@ -48,7 +51,7 @@ class JsonbTest {
                 case "square":
                     return Square.class;
                 default:
-                    throw new IllegalStateException("unknown shape type " + type);
+                    throw new JsonbException("unknown shape type " + type);
             }
         }
     }
@@ -67,16 +70,9 @@ class JsonbTest {
         }
     }
 
-    public static class CircleDeserializer implements JsonbDeserializer<Circle> {
-        @Override public Circle deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
-            JsonObject value = (JsonObject) parser.getValue();
-            return new Circle(value.getJsonNumber("radius").doubleValue());
-        }
-    }
-
     @JsonbTypeSerializer(CircleSerializer.class)
-    @JsonbTypeDeserializer(CircleDeserializer.class)
-    public static @Value class Circle implements Shape {
+    @Accessors(chain = true)
+    public static @Data class Circle implements Shape {
         double radius;
     }
 
@@ -91,16 +87,9 @@ class JsonbTest {
         }
     }
 
-    public static class SquareDeserializer implements JsonbDeserializer<Square> {
-        @Override public Square deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
-            JsonObject value = (JsonObject) parser.getValue();
-            return new Square(value.getJsonNumber("side").doubleValue());
-        }
-    }
-
     @JsonbTypeSerializer(SquareSerializer.class)
-    @JsonbTypeDeserializer(SquareDeserializer.class)
-    public static @Value class Square implements Shape {
+    @Accessors(chain = true)
+    public static @Data class Square implements Shape {
         double side;
     }
 
@@ -127,5 +116,23 @@ class JsonbTest {
         List<Shape> shapes = JSONB.fromJson(JSON, SHAPE_LIST);
 
         then(shapes).isEqualTo(SHAPES);
+    }
+
+    @Test void shouldFailToDeserializeMissingTypeField() {
+        Throwable throwable = catchThrowable(() ->
+            JSONB.fromJson("[{'radius':5.0}]".replace('\'', '"'), SHAPE_LIST)
+        );
+
+        then(throwable).isInstanceOf(JsonbException.class)
+            .hasMessage("unknown shape type <null>");
+    }
+
+    @Test void shouldFailToDeserializeUnknownTypeField() {
+        Throwable throwable = catchThrowable(() ->
+            JSONB.fromJson("[{'@type':'cube','side':13.0}]".replace('\'', '"'), SHAPE_LIST)
+        );
+
+        then(throwable).isInstanceOf(JsonbException.class)
+            .hasMessage("unknown shape type cube");
     }
 }
