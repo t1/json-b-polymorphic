@@ -20,110 +20,112 @@ import java.util.List;
 
 import static org.assertj.core.api.BDDAssertions.then;
 
+@SuppressWarnings("unused")
 class JsonbTest {
 
-    public static final String EMAIL_JSON = "{'type':'email','email':'test@somewhere.com'}".replace('\'', '"');
-    public static final String PHONE_JSON = "{'type':'phone','phone':'+49721123456'}".replace('\'', '"');
-    public static final String JSON = "[" + EMAIL_JSON + "," + PHONE_JSON + "]";
-    public static final EMail EMAIL = new EMail("test@somewhere.com");
-    public static final PhoneNumber PHONE_NUMBER = new PhoneNumber("+49721123456");
-    public static final List<Contact> CONTACTS = List.of(EMAIL, PHONE_NUMBER);
-    private static final Jsonb JSONB = JsonbBuilder.create();
+    static final String CIRCLE_JSON = "{'@type':'circle','radius':5.0}".replace('\'', '"');
+    static final String SQUARE_JSON = "{'side':2.0,'@type':'square'}".replace('\'', '"');
+    static final String JSON = "[" + CIRCLE_JSON + "," + SQUARE_JSON + "]";
+    static final Circle CIRCLE = new Circle(5.0);
+    static final Square SQUARE = new Square(2.0);
+    static final List<Shape> SHAPES = List.of(CIRCLE, SQUARE);
 
-    public static class ContactDeserializer implements JsonbDeserializer<Contact> {
-        @Override public Contact deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
+    static final Jsonb JSONB = JsonbBuilder.create();
+    static final Type SHAPE_LIST = new ArrayList<Shape>() {}.getClass().getGenericSuperclass();
+
+
+    public static class ShapeDeserializer implements JsonbDeserializer<Shape> {
+        @Override public Shape deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
             JsonObject value = parser.getObject();
-            String type = value.getString("type", null);
+            String type = value.getString("@type", null);
             return JSONB.fromJson(value.toString(), classFor(type));
         }
 
-        private Class<? extends Contact> classFor(String type) {
+        private Class<? extends Shape> classFor(String type) {
             switch (type) {
-                case "email":
-                    return EMail.class;
-                case "phone":
-                    return PhoneNumber.class;
+                case "circle":
+                    return Circle.class;
+                case "square":
+                    return Square.class;
                 default:
-                    throw new IllegalStateException("unknown contact type " + type);
+                    throw new IllegalStateException("unknown shape type " + type);
             }
         }
     }
 
-    @JsonbTypeDeserializer(ContactDeserializer.class)
-    interface Contact {}
+    @JsonbTypeDeserializer(ShapeDeserializer.class)
+    public interface Shape {}
 
 
-    public static class EMailSerializer implements JsonbSerializer<EMail> {
-        @Override public void serialize(EMail obj, JsonGenerator generator, SerializationContext ctx) {
+    public static class CircleSerializer implements JsonbSerializer<Circle> {
+        @Override public void serialize(Circle obj, JsonGenerator generator, SerializationContext ctx) {
             generator
                 .writeStartObject()
-                .write("type", "email")
-                .write("email", obj.getValue())
+                .write("@type", "circle")
+                .write("radius", obj.getRadius())
                 .writeEnd();
         }
     }
 
-    public static class EMailDeserializer implements JsonbDeserializer<EMail> {
-        @Override public EMail deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
+    public static class CircleDeserializer implements JsonbDeserializer<Circle> {
+        @Override public Circle deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
             JsonObject value = (JsonObject) parser.getValue();
-            return new EMail(value.getString("email"));
+            return new Circle(value.getJsonNumber("radius").doubleValue());
         }
     }
 
-    @JsonbTypeSerializer(EMailSerializer.class)
-    @JsonbTypeDeserializer(EMailDeserializer.class)
-    public static @Value class EMail implements Contact {
-        String value;
+    @JsonbTypeSerializer(CircleSerializer.class)
+    @JsonbTypeDeserializer(CircleDeserializer.class)
+    public static @Value class Circle implements Shape {
+        double radius;
     }
 
 
-    public static class PhoneNumberSerializer implements JsonbSerializer<PhoneNumber> {
-        @Override public void serialize(PhoneNumber obj, JsonGenerator generator, SerializationContext ctx) {
+    public static class SquareSerializer implements JsonbSerializer<Square> {
+        @Override public void serialize(Square obj, JsonGenerator generator, SerializationContext ctx) {
             generator
                 .writeStartObject()
-                .write("type", "phone")
-                .write("phone", obj.getValue())
+                .write("@type", "square")
+                .write("side", obj.getSide())
                 .writeEnd();
         }
     }
 
-    public static class PhoneNumberDeserializer implements JsonbDeserializer<PhoneNumber> {
-        @Override public PhoneNumber deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
+    public static class SquareDeserializer implements JsonbDeserializer<Square> {
+        @Override public Square deserialize(JsonParser parser, DeserializationContext ctx, Type rtType) {
             JsonObject value = (JsonObject) parser.getValue();
-            return new PhoneNumber(value.getString("phone"));
+            return new Square(value.getJsonNumber("side").doubleValue());
         }
     }
 
-    @JsonbTypeSerializer(PhoneNumberSerializer.class)
-    @JsonbTypeDeserializer(PhoneNumberDeserializer.class)
-    public static @Value class PhoneNumber implements Contact {
-        String value;
+    @JsonbTypeSerializer(SquareSerializer.class)
+    @JsonbTypeDeserializer(SquareDeserializer.class)
+    public static @Value class Square implements Shape {
+        double side;
     }
 
 
     @Test void shouldSerializeList() {
-        String json = JSONB.toJson(CONTACTS);
+        String json = JSONB.toJson(SHAPES);
 
-        then(json).isEqualTo(JSON);
+        then(JSONB.<List<Shape>>fromJson(json, SHAPE_LIST)).isEqualTo(SHAPES);
     }
 
-    @Test void shouldDeserializeEMail() {
-        EMail eMail = JSONB.fromJson(EMAIL_JSON, EMail.class);
+    @Test void shouldDeserializeCircle() {
+        Circle circle = JSONB.fromJson(CIRCLE_JSON, Circle.class);
 
-        then(eMail).isEqualTo(EMAIL);
+        then(circle).isEqualTo(CIRCLE);
     }
 
-    @Test void shouldDeserializePhoneNumber() {
-        PhoneNumber phone = JSONB.fromJson(PHONE_JSON, PhoneNumber.class);
+    @Test void shouldDeserializeSquare() {
+        Square square = JSONB.fromJson(SQUARE_JSON, Square.class);
 
-        then(phone).isEqualTo(PHONE_NUMBER);
+        then(square).isEqualTo(SQUARE);
     }
 
     @Test void shouldDeserializeList() {
-        Type type = new ArrayList<Contact>() {}.getClass().getGenericSuperclass();
+        List<Shape> shapes = JSONB.fromJson(JSON, SHAPE_LIST);
 
-        List<Contact> contacts = JSONB.fromJson(JSON, type);
-
-        then(contacts).isEqualTo(CONTACTS);
+        then(shapes).isEqualTo(SHAPES);
     }
 }
